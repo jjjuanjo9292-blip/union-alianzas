@@ -356,7 +356,43 @@
         font-size: 1.3rem;
       }
     }
-  </style>
+ .btn-admin-toggle {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--card);
+  color: var(--muted);
+  font-weight: 700;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+
+.btn-admin-toggle.admin-activo {
+  border-color: #22c55e;
+  color: #4ade80;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 16px;
+  z-index: 1000;
+}
+
+.modal-box {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--accent);
+  border-radius: 14px;
+  padding: 20px;
+  width: 100%;
+  max-width: 440px;
+}
+</style>
 </head>
 <body>
 
@@ -378,6 +414,7 @@
 
     <!-- CONTENIDO PRINCIPAL (Oculto hasta elegir idioma) -->
     <div id="app-principal" class="hidden">
+      <button type="button" id="btn-admin" class="btn-admin-toggle">🔒 Admin</button>
 
       <!-- Barra superior de cambio rápido de idioma -->
       <div class="top-lang-bar">
@@ -475,6 +512,7 @@
                 <th id="th-heroe"></th>
                 <th id="th-escuadron"></th>
                 <th id="th-asiento"></th>
+                <th id="th-acciones" class="hidden">Admin</th>
               </tr>
             </thead>
             <tbody id="tabla-cuerpo"></tbody>
@@ -484,11 +522,49 @@
 
     </div>
   </div>
+  <div id="modal-editar" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h3>✏️ Editar jugador</h3>
+    <form id="form-editar">
+      <!-- Este input oculto guarda el ID único de Firebase del jugador -->
+      <input type="hidden" id="edit-id">
+
+      <div class="form-group">
+        <label>Nombre</label>
+        <input type="text" id="edit-nombre" required>
+      </div>
+      <div class="form-group">
+        <label>Servidor</label>
+        <input type="text" id="edit-servidor" required>
+      </div>
+      <div class="form-group">
+        <label>Poder Héroe (M)</label>
+        <input type="number" id="edit-poderHeroe" step="0.01" required>
+      </div>
+      <div class="form-group">
+        <label>Escuadrón 1 (M)</label>
+        <input type="number" id="edit-poderEscuadron" step="0.01" required>
+      </div>
+      <div class="form-group">
+        <label>Asiento</label>
+        <select id="edit-asiento" required>
+          <option value="Blanco">⬜ Blanco</option>
+          <option value="Azul">🟦 Azul</option>
+          <option value="Morado">🟪 Morado</option>
+        </select>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button type="button" id="btn-cancelar-edit" class="btn btn-secondary" style="margin:0;">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
 
   <!-- CONEXIÓN CON FIREBASE REALTIME DATABASE -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getDatabase, ref, push, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+    import { getDatabase, ref, push, onValue, update, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBs0Ih5I-AI7vP-WfDYIMS6pgjA5xzexvI",
@@ -664,6 +740,13 @@
     let idiomaActual = 'es';
     let datosEnMemoria = null;
     let datosCargados = false;
+    const CLAVE_ADMIN = "1999"; // Cambia esto por tu clave
+let esAdmin = false;
+
+const btnAdmin = document.getElementById('btn-admin');
+const thAcciones = document.getElementById('th-acciones');
+const modalEditar = document.getElementById('modal-editar');
+const formEditar = document.getElementById('form-editar');
 
     // Referencias del DOM
     const vistaIdioma = document.getElementById('vista-idioma');
@@ -821,13 +904,23 @@
         return;
       }
 
-      const listaJugadores = Object.values(datosEnMemoria).sort((a, b) => b.poderHeroe - a.poderHeroe);
+const listaJugadores = Object.entries(datosEnMemoria)
+  .map(([id, datos]) => ({ id, ...datos }))
+  .sort((a, b) => b.poderHeroe - a.poderHeroe);      
       actualizarEstadisticas(listaJugadores);
 
       listaJugadores.forEach((jugador, index) => {
         const claseBadge = `badge-${jugador.asiento.toLowerCase()}`;
         const textoAsiento = t.asientos[jugador.asiento] || jugador.asiento;
         const fila = document.createElement('tr');
+        let celdaAdmin = '';
+        if (esAdmin) {
+          celdaAdmin = `
+            <td>
+              <button type="button" class="btn-edit" data-id="${jugador.id}">✏️</button>
+              <button type="button" class="btn-delete" data-id="${jugador.id}">🗑️</button>
+            </td>`;
+        }
         fila.innerHTML = `
           <td class="rank-cell">#${index + 1}</td>
           <td><strong>${escaparHTML(jugador.nombre)}</strong></td>
@@ -835,6 +928,7 @@
           <td><strong>${Number(jugador.poderHeroe).toFixed(2)} M</strong></td>
           <td>${Number(jugador.poderEscuadron).toFixed(2)} M</td>
           <td><span class="badge ${claseBadge}">${escaparHTML(textoAsiento)}</span></td>
+          ${celdaAdmin}
         `;
         tablaCuerpo.appendChild(fila);
       });
@@ -852,6 +946,70 @@
       datosEnMemoria = snapshot.val();
       datosCargados = true;
       renderizarTabla();
+    });
+  // 1. Activar o desactivar modo Admin
+    btnAdmin.addEventListener('click', () => {
+      if (esAdmin) {
+        esAdmin = false;
+        btnAdmin.textContent = "🔒 Admin";
+        btnAdmin.classList.remove('admin-activo');
+        thAcciones.classList.add('hidden');
+        renderizarTabla();
+      } else {
+        const clave = prompt("Ingresa la clave de administrador:");
+        if (clave === CLAVE_ADMIN) {
+          esAdmin = true;
+          btnAdmin.textContent = "🔓 Salir Admin";
+          btnAdmin.classList.add('admin-activo');
+          thAcciones.classList.remove('hidden');
+          mostrarTabla();
+          renderizarTabla();
+        } else if (clave !== null) {
+          alert("Clave incorrecta");
+        }
+      }
+    });
+
+    // 2. Detectar clic en Editar (✏️) o Borrar (🗑️) dentro de la tabla
+    tablaCuerpo.addEventListener('click', async (e) => {
+      if (!esAdmin) return;
+
+      if (e.target.classList.contains('btn-edit')) {
+        const id = e.target.dataset.id;
+        const j = datosEnMemoria[id];
+        document.getElementById('edit-id').value = id;
+        document.getElementById('edit-nombre').value = j.nombre;
+        document.getElementById('edit-servidor').value = j.servidor;
+        document.getElementById('edit-poderHeroe').value = j.poderHeroe;
+        document.getElementById('edit-poderEscuadron').value = j.poderEscuadron;
+        document.getElementById('edit-asiento').value = j.asiento;
+        modalEditar.classList.remove('hidden');
+      }
+
+      if (e.target.classList.contains('btn-delete')) {
+        const id = e.target.dataset.id;
+        if (confirm("¿Seguro que deseas eliminar este jugador?")) {
+          await remove(ref(db, `jugadores_transferencia/${id}`));
+        }
+      }
+    });
+
+    // 3. Cerrar modal o guardar cambios en Firebase
+    document.getElementById('btn-cancelar-edit').addEventListener('click', () => {
+      modalEditar.classList.add('hidden');
+    });
+
+    formEditar.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('edit-id').value;
+      await update(ref(db, `jugadores_transferencia/${id}`), {
+        nombre: document.getElementById('edit-nombre').value.trim(),
+        servidor: document.getElementById('edit-servidor').value.trim(),
+        poderHeroe: parseFloat(document.getElementById('edit-poderHeroe').value),
+        poderEscuadron: parseFloat(document.getElementById('edit-poderEscuadron').value),
+        asiento: document.getElementById('edit-asiento').value
+      });
+      modalEditar.classList.add('hidden');
     });
   </script>
 </body>
